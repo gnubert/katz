@@ -51,7 +51,7 @@ Here is a list of fun things to do with katz:
         20057 # <== that is the file size in bytes
         $ katz 2020 source 2020 >> file
     - source:
-        dd if=file seek=20057 | katz 2020 target 2020
+        dd if=file skip=20057 | katz 2020 target 2020
 
 - Chat:
     - source:
