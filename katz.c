@@ -726,7 +726,6 @@ int katz_process_in(struct katzconn *conn)
         katzconn_insert_iq(conn, p.data, nread, p.seq);
     }
     else {
-        conn->outstanding_ack = 1;
         free(p.data);
         debug("ignoring data, old seq\n");
     }
@@ -735,12 +734,18 @@ int katz_process_in(struct katzconn *conn)
         debug("got new ACK, clearing oq\n");
         katzconn_process_ack(conn, p.ack);
     }
-#ifdef DEBUG
     else {
+        /* XXX: need some way to decide wether SEQ was lost */
+
+        if (conn->n_oq > 0)
+            conn->outstanding_ack = 1;
+        else
+            conn->outstanding_ack = 0;
+#ifdef DEBUG
         debug("got old ACK(%i), not clearing oq:\n", p.ack);
         print_katzq(conn->oq);
-    }
 #endif
+    }
 
     return 0;
 }
