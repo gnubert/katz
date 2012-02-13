@@ -136,7 +136,7 @@ void print_katzconn(struct katzconn *conn)
     if (conn->bwlim != -1) {
         fprintf(stderr, "bwrate: %i\n", conn->bwrate);
         fprintf(stderr, "currate: %i\n", katzconn_currate(conn));
-    fprintf(stderr, "last_check: %s\n", ctime(&conn->last_check));
+        fprintf(stderr, "last_check: %s\n", ctime(&conn->last_check));
     }
     fprintf(stderr, "n_iq: %i\n", conn->n_iq);
     fprintf(stderr, "n_oq: %i\n", conn->n_oq);
@@ -178,22 +178,16 @@ inline struct katzq *free_katzq(struct katzq *q)
  */
 inline void katzconn_process_ack(struct katzconn *conn, int ack)
 {
-#ifdef DEBUG
-    fprintf(stderr, "clearing oq(oq->seq:%i/ack:%i) ", conn->oq->seq, ack);
-#endif
+    debug("clearing oq(oq->seq:%i/ack:%i) ", conn->oq->seq, ack);
     while ((conn->oq != NULL) && (conn->oq->seq - ack < 0)) {
-#ifdef DEBUG
-        fprintf(stderr, ".");
-#endif
+        debug(".");
         conn->seq = conn->oq->seq;
         conn->oq = free_katzq(conn->oq);
         conn->n_oq--;
     }
     if (conn->oq == NULL)
         conn->oq_last = NULL;
-#ifdef DEBUG
-    fprintf(stderr, "done.\n");
-#endif
+    debug("done.\n");
 }
 
 /**
@@ -242,14 +236,12 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
     e->sent.tv_nsec = 0;
 
 #ifdef DEBUG
-    fprintf(stderr, "Queueing element:\n");
+    debug("Queueing element:\n");
     print_katzq(e);
 #endif
 
     if (seq <= conn->ack) {
-#ifdef DEBUG
-        fprintf(stderr, "late packet");
-#endif
+        debug("late packet");
         return;
     }
     
@@ -291,12 +283,12 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
 
 
 #ifdef DEBUG
-    fprintf(stderr, "iq is now (seq): ");
+    debug("iq is now (seq): ");
 
     for (p = conn->iq; p!=NULL; p = p->next) {
-        fprintf(stderr, "%i, ", p->seq);
+        debug("%i, ", p->seq);
     }
-    fprintf(stderr, "\n");
+    debug("\n");
 #endif
 
 }
@@ -331,9 +323,7 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
                 e = q;
             /* more so, then the last timeout we investigated?> */
             else if (e->sent.tv_sec < q->sent.tv_sec) {
-#ifdef DEBUG
-                fprintf(stderr, "there really was data later in the queue that timed out earlier\n");
-#endif
+                debug("there really was data later in the queue that timed out earlier\n");
                 e = q;
             }
         }
@@ -349,21 +339,15 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
     
     /* timeout > new > oldest > first */
     if (e != NULL) {
-#ifdef DEBUG
-        fprintf(stderr, "(timeout)");
-#endif
+        debug("(timeout)");
         q = e;
     }
     else if (n != NULL) {
-#ifdef DEBUG
-        fprintf(stderr, "(new)");
-#endif
+        debug("(new)");
         q = n;
     }
     else if (o != NULL) {
-#ifdef DEBUG
-        fprintf(stderr, "(oldest)");
-#endif
+        debug("(oldest)");
         q = o;
     }
     else {
@@ -373,7 +357,7 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
         clock_gettime(CLOCK_MONOTONIC, &q->sent);
 
 #ifdef DEBUG
-    fprintf(stderr, "returning oq element:\n");
+    debug("returning oq element:\n");
     print_katzq(q);
 #endif
 
@@ -467,7 +451,7 @@ inline int katzconn_keepalive(struct katzconn *conn)
 
     if (s < 0) {
 #ifdef DEBUG
-        fprintf(stderr, "keepalive: s1: %i, s2: %i, s: %i\n", s1, s2, s);
+        debug("keepalive: s1: %i, s2: %i, s: %i\n", s1, s2, s);
 #endif
         return 0;
     }
@@ -501,9 +485,7 @@ inline int smallest_oq_timeout (struct katzconn *conn)
             }
         }
         else { // unsent data, no time to lose!
-#ifdef DEBUG
-            fprintf(stderr, "time to next timeout: %i\n", 0);
-#endif
+            debug("time to next timeout: %i\n", 0);
             return 0;
         }
     }
@@ -522,9 +504,7 @@ inline int smallest_oq_timeout (struct katzconn *conn)
     if (t < 0)
         t = 0;
 
-#ifdef DEBUG
-    fprintf(stderr, "time to next timeout: %i\n", t);
-#endif
+    debug("time to next timeout: %i\n", t);
 
     return t;
 }
@@ -556,9 +536,7 @@ int recv_katzpack(int sock, struct katzpack *p)
         err(1, "calloc");
 
     if ((nread = recv(sock, buf, sizeof(struct katzpack) + BUF_SIZE, 0)) == -1) {
-#ifdef DEBUG
-        fprintf(stderr, "failed to receive packet\n");
-#endif
+        debug( "failed to receive packet\n");
         free(buf);
         return -1;
     }
@@ -579,10 +557,10 @@ int recv_katzpack(int sock, struct katzpack *p)
     p->data = data;
     memcpy(p->data, buf+sizeof(struct katzpack), vl);
 
-    //fprintf(stderr, "<(%i,%i) ", p->seq, p->ack);
+    //debug("<(%i,%i) ", p->seq, p->ack);
 
 #ifdef DEBUG
-    fprintf(stderr, "received packet (datalength %i) :\n", vl);
+    debug("received packet (datalength %i) :\n", vl);
     print_katzpack(p);
 #endif
     free(buf);
@@ -609,10 +587,9 @@ int send_katzpack(struct katzconn *conn, struct katzpack *p, int len)
             delay = MIN_SLEEP;
         if (usleep(delay*1000) == -1)
             err(1, "usleep");
-#ifdef DEBUG
-        else
-            fprintf(stderr, "slept %i msecs\n", delay);
-#endif
+        else {
+            debug("slept %i msecs\n", delay);
+        }
     }
 
     if ((buf = calloc(1, sizeof(struct katzpack) + len)) == NULL)
@@ -639,19 +616,19 @@ int send_katzpack(struct katzconn *conn, struct katzpack *p, int len)
 
 #ifdef DEBUG
     if (nwritten != -1)
-        fprintf(stderr, "sent packet:\n");
+        debug("sent packet:\n");
     else
-        fprintf(stderr, "failed sending packet:\n");
+        debug("failed sending packet:\n");
     print_katzpack(p);
 #endif
 
     free(buf);
 
     if (nwritten == -1) {
-        //fprintf(stderr, ">X(%i,%i) ", p->seq, p->ack);
+        //debug(">X(%i,%i) ", p->seq, p->ack);
         return -1;
     } else {
-        //fprintf(stderr, ">(%i,%i) ", p->seq, p->ack);
+        //debug(">(%i,%i) ", p->seq, p->ack);
         return vl;
     }
 }
@@ -670,17 +647,13 @@ int katz_process_out(struct katzconn *conn)
 
     /* send keepalive / acknowledge data OR send data */
     if (q==NULL) {
-#ifdef DEBUG
-        fprintf(stderr, "sending keepalive/acking data\n");
-#endif
+        debug( "sending keepalive/acking data\n");
         len = 0;
         p.data = NULL;
         p.seq = 0;
     }
     else {
-#ifdef DEBUG
-        fprintf(stderr, "sending data\n");
-#endif
+        debug("sending data\n");
         len = q->len;
         p.data = q->data;
         p.seq = q->seq;
@@ -696,9 +669,7 @@ int katz_process_out(struct katzconn *conn)
         if(clock_gettime(CLOCK_MONOTONIC, &conn->last_event))
             err(1, "clock_gettime");
         if (conn->n_oq == 0) {
-#ifdef DEBUG
-            fprintf(stderr, "whole queue sent, disabling KSO\n");
-#endif
+            debug("whole queue sent, disabling KSO\n");
             conn->opfd->events = 0; // disable KSO
         }
     }
@@ -721,9 +692,7 @@ int katz_process_in(struct katzconn *conn)
     p.data = NULL;
 
     nread = recv_katzpack(conn->sock, &p);
-#ifdef DEBUG
-    fprintf(stderr, "processing packet\n");
-#endif
+    debug("processing packet\n");
     if (nread == -1)
         errx(1, "recv_katzpack");
 
@@ -734,24 +703,18 @@ int katz_process_in(struct katzconn *conn)
     switch (p.flag) {
         case KSYN:
             free(p.data);
-#ifdef DEBUG
-            fprintf(stderr, "KSYN: ignoring\n");
-#endif
+            debug("KSYN: ignoring\n");
             return 0;
         case KFIN:
             conn->flag = KFIN;
             conn->ipfd->fd = -1; // disable KSI permanently
             free(p.data);
-#ifdef DEBUG
-            fprintf(stderr, "KFIN: disable KSI\n");
-#endif
+            debug("KFIN: disable KSI\n");
             return -1;
         case KNIL: // XXX:
             errx(1, "got strange packet (KNIL) or recv_katzpack failed");
         case KACK:
-#ifdef DEBUG
-            fprintf(stderr, "KACK: parsing...\n");
-#endif
+            debug("KACK: parsing...\n");
             break;
         default:
             errx(1, "got strange packet.");
@@ -759,28 +722,22 @@ int katz_process_in(struct katzconn *conn)
 
 
     if (p.seq > conn->ack) { // got new data, fill buffer
-#ifdef DEBUG
-        fprintf(stderr, "appending new data to iq\n");
-#endif
+        debug("appending new data to iq\n");
         katzconn_insert_iq(conn, p.data, nread, p.seq);
     }
     else {
         conn->outstanding_ack = 1;
         free(p.data);
-#ifdef DEBUG
-        fprintf(stderr, "ignoring data, old seq\n");
-#endif
+        debug("ignoring data, old seq\n");
     }
 
     if ((conn->oq != NULL) && (p.ack > conn->oq->seq)) { // we delivered data, clear buffer
-#ifdef DEBUG
-        fprintf(stderr, "got new ACK, clearing oq\n");
-#endif
+        debug("got new ACK, clearing oq\n");
         katzconn_process_ack(conn, p.ack);
     }
 #ifdef DEBUG
     else {
-        fprintf(stderr, "got old ACK(%i), not clearing oq:\n", p.ack);
+        debug("got old ACK(%i), not clearing oq:\n", p.ack);
         print_katzq(conn->oq);
     }
 #endif
@@ -831,17 +788,17 @@ int bind_socket(
     if (error)
         errx(1, "%s", gai_strerror(error));
     else
-        fprintf(stderr, "(bind) res->ai_addr: %s\n", hn);
+        debug("(bind) res->ai_addr: %s\n", hn);
 
     if (res0->ai_next == NULL)
-        fprintf(stderr, "(bind) and that was the only address\n");
+        debug("(bind) and that was the only address\n");
 
     for (res = res0->ai_next; res; res = res->ai_next) {
         error = getnameinfo(res->ai_addr, res->ai_addrlen, hn, sizeof(hn), NULL, 0, NI_NUMERICHOST);
         if (error)
             errx(1, "%s", gai_strerror(error));
         else
-            fprintf(stderr, "(bind ignored) res->ai_addr: %s\n", hn);
+            debug("(bind ignored) res->ai_addr: %s\n", hn);
     }
 #endif
 
@@ -881,7 +838,7 @@ int connected_udp_socket(struct katzparm *kp)
         if (error)
             errx(1, "%s", gai_strerror(error));
         else
-            fprintf(stderr, "(connect) res->ai_addr: %s\n", hn);
+            debug("(connect) res->ai_addr: %s\n", hn);
 #endif
 
         /* try to create socket */
@@ -965,16 +922,14 @@ int katz_read(struct katzconn *conn, char *buf, int len)
         conn->outstanding_ack = 1;
 
 #ifdef DEBUG
-        fprintf(stderr, "returning %i bytes from conn->iq which is now\n", nread);
+        debug("returning %i bytes from conn->iq which is now\n", nread);
         print_katzq(conn->iq);
 #endif
 
         return nread;
     }
     else {
-#ifdef DEBUG
-        fprintf(stderr, "not returning bytes from conn->iq, it contains %i elements\n", conn->n_iq);
-#endif
+        debug("not returning bytes from conn->iq, it contains %i elements\n", conn->n_iq);
         return -2;
     }
 
@@ -996,15 +951,11 @@ int katz_write(struct katzconn *conn, char *buf, int len)
         // TODO: make sure len < MAX_PAYLOAD
         katzconn_append_oq(conn, buf, len);
         conn->opfd->events = POLLOUT; // enable KSO
-#ifdef DEBUG
-        fprintf(stderr, "appending %i bytes to conn->oq (now: n_oq==%i)\n", len, conn->n_oq);
-#endif
+        debug("appending %i bytes to conn->oq (now: n_oq==%i)\n", len, conn->n_oq);
         return len;
     }
     else {
-#ifdef DEBUG
-        fprintf(stderr, "not queueing, conn->n_oq(%i) == conn->oq_maxlen(%i)\n", conn->n_oq, conn->oq_maxlen);
-#endif
+        debug("not queueing, conn->n_oq(%i) == conn->oq_maxlen(%i)\n", conn->n_oq, conn->oq_maxlen);
         return 0;
     }
 
@@ -1042,9 +993,7 @@ int katz_connect(struct katzconn *conn)
     custom_error = 0;
     for (r=0; r < MAX_RETRIES; r++) {
 
-#ifdef DEBUG
-        fprintf(stderr, "sending SYN\n");
-#endif
+        debug("sending SYN\n");
         /* send SYN */
         if (send_katzpack(conn, &out, 0) == -1) {
             cause = "send";
@@ -1052,9 +1001,7 @@ int katz_connect(struct katzconn *conn)
             continue;
         }
 
-#ifdef DEBUG
-        fprintf(stderr, "receiving datagram\n");
-#endif
+        debug("receiving datagram\n");
         /* receive ACK */
         if ((nread = recv_katzpack(conn->sock, &in)) == -1) {
             cause = "recv";
@@ -1066,26 +1013,21 @@ int katz_connect(struct katzconn *conn)
 
         /* got msg, check whether it is a SYN */
         if (in.flag == KSYN) {
-#ifdef DEBUG
-            fprintf(stderr, "connection established\n");
-#endif
+            debug("connection established\n");
             conn->flag = KACK;
             conn->ack = in.seq;
 
             if (in.ack == 0) {
-#ifdef DEBUG
-                fprintf(stderr, "sending SYN reply\n");
-#endif
+                debug("sending SYN reply\n");
                 out.flag = KSYN;
                 out.seq = conn->seq;
                 out.ack = conn->ack;
                 if (send_katzpack(conn, &out, 0) == -1)
                     errx(1, "send_katzpack");
             }
-#ifdef DEBUG
-            else
-                fprintf(stderr, "not sending SYN reply\n");
-#endif
+            else {
+                debug("not sending SYN reply\n");
+            }
 
             if(clock_gettime(CLOCK_MONOTONIC, &conn->last_event))
                 err(1, "clock_gettime");
@@ -1220,9 +1162,9 @@ void katz_peer(struct katzparm *kp)
                 || (conn.outstanding_ack)
                 ) {
             pfd[KSO].events = POLLOUT;
-            //fprintf(stderr, "^");
+            //debug("^");
         } else {
-            //fprintf(stderr, "v");
+            //debug("v");
             pfd[KSO].events = 0;
         }
 
@@ -1236,11 +1178,7 @@ void katz_peer(struct katzparm *kp)
             err(1, "poll");
         }
         else if (nfds == 0) {
-#ifdef DEBUG
-            fprintf(stderr, "keepalive timeout\n");
-            print_katzconn(&conn);
-            //XXX: ^^^^^^^^
-#endif 
+            debug("keepalive timeout\n");
         }
             
 
@@ -1267,9 +1205,7 @@ void katz_peer(struct katzparm *kp)
                 if (nread == -1)
                     err(1, "read KFI");
                 if (nread == 0) { // local EOF
-#ifdef DEBUG
-                    fprintf(stderr, "disabling KFI permanently\n");
-#endif
+                    debug("disabling KFI permanently\n");
                     pfd[KFI].fd = -1; // disable KFI permanently
                 }
                 else {

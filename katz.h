@@ -164,3 +164,9 @@ void katz_init_connection(
         struct katzconn *conn, struct katzparm *kp,
         struct pollfd *ipfd, struct pollfd *opfd);
 void katz_peer(struct katzparm *kp);
+
+#ifdef DEBUG
+#define debug(...) fprintf(stderr,  __VA_ARGS__)
+#else
+#define debug(...) ((void) 0)
+#endif
