@@ -1,0 +1,115 @@
+KATZ:
+- is intended as a peer to peer file sharing application for use
+  behind firewalls or NAT in scenarios where you would usually use
+  netcat.
+- does UDP hole punching for connection establishment.
+- creates a reliable, ordered, duplex connection via UDP.
+- can be used to exploit bandwidth since katz does not limit its
+  traffic consumption like TCP does.
+- does still have some issues:
+    - You can only transfer 2^32 kilobytes in one run.
+    - It has not undergone much testing.
+
+
+USAGE:
+- katz has a built in reference. To read it, run:
+    $ katz 
+
+- Use -l <rate in kilobytes/second> to limit the bandwidth katz uses.
+  By default katz uses all the bandwidth it can get. Unlike regular
+  connections (via TCP) katz does not try to share the available
+  bandwidth in a fair manner. Therefore you will probably want to use
+  this most of the time in order not to make your internet connection
+  unusable for anything else.
+  The limit is only enforced in the process that was started with this
+  limit. Thus, in order to limit both traffic directions you will have
+  to specify a limit on both hosts.-h
+  Note, that this limits the bandwidth katz uses, not the data rate.
+  Due to packet loss and reordering, the rate for data passing through
+  katz will be somewhat slower depending on the quality of the link.
+  katz also has a minimum overhead of 10 bytes per kilobyte.
+
+Here is a list of fun things to do with katz:
+
+- File transfer:
+    - source:
+        $ katz 2020 target 2020 < filename
+    - target:
+        $ katz 2020 source 2020 > filename
+- Use dd to get a summary of transmitted data:
+    - target:
+        $ katz <options> | dd > file
+- You can even get an intermediate summary when using dd:
+    - target:
+        $ pkill -USR1 '^dd$'
+- Use pv (pipe viewer) to see your current data rate:
+    - target:
+        $ katz <options> | pv > file
+- Resume a file transfer:
+    - on the target, to figure out the size of the partially transferred file:
+        $ stat --format '%s' file
+        20057 # <== that is the file size in bytes
+        $ katz 2020 source 2020 >> file
+    - source:
+        dd if=file seek=20057 | katz 2020 target 2020
+
+- Chat:
+    - source:
+        $ katz 2020 target 2020
+    - target:
+        $ katz 2020 source 2020
+    - press [ctrl] [d] on either side to close stdin to terminate the
+      session
+
+- Tunnel a TCP connection:
+  Suppose you want to tunnel local TCP port 8080 to remote 80, you can
+  do this:
+    - client:
+        $ mkfifo r
+        $ nc -l -p 8080 <r | katz 2020 server 2020  >r
+        $ rm r
+    - server:
+        $ mkfifo r
+        $ katz 2020 client 2020 <r | nc localhost 80 >r
+        $ rm r
+
+
+RELATED RESOURCES:
+
+- UDT:
+  http://udt.sourceforge.net/
+  "UDT is a reliable UDP based application level data transport
+  protocol for distributed data intensive applications over wide area
+  high-speed networks."
+
+- libnice:
+  http://nice.freedesktop.org/wiki/
+  "Libnice is an implementation of the IETF's Interactive Connectivity
+  Establishment (ICE) standard (RFC 5245) and the Session Traversal
+  Utilities for NAT (STUN) standard (RFC 5389)."
+
+- udptunnel
+  http://code.google.com/p/udptunnel/
+  - Tunnels TCP over UDP, has some limitations:
+    - has serious performance issues
+    - seems to have a memory management issue
+    - only tries to transport one datagram at a time
+    - subtly breaks TCP
+      - in case of failed malloc (easily fixed)
+      - reads from TCP socket as opposed to peek
+    - seems to wait for a new maintainer ;-)
+
+- chownat
+  http://samy.pl/chownat/
+  - Tunnels TCP via UDP
+  - written in perl
+
+- pwnat
+  http://samy.pl/pwnat/
+  - does connection establishment by exploiting ICMP echo replies =)
+  - written in c
+  - has some limitations:
+    - pwnat is based on udptunnel, it does not appear to have solved
+      any of the issues udptunnel has.
+    - pwnat segfaulted the first time I tried it.
+    - It needs to be run as superuser because it uses raw IP.
