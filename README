@@ -13,7 +13,7 @@ KATZ:
 
 USAGE:
 - katz has a built in reference. To read it, run:
-    $ katz 
+    $ katz -h
 
 - Use -l <rate in kilobytes/second> to limit the bandwidth katz uses.
   By default katz uses all the bandwidth it can get. Unlike regular
