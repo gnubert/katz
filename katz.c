@@ -343,14 +343,14 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
     }
 
     
-    /* timeout > new > oldest > first */
-    if (e != NULL) {
-        debug("(timeout)");
-        q = e;
-    }
-    else if (n != NULL) {
+    /* new > timeout > oldest > first */
+    if (n != NULL) {
         debug("(new)");
         q = n;
+    }
+    else if (e != NULL) {
+        debug("(timeout)");
+        q = e;
     }
     else if (o != NULL) {
         debug("(oldest)");
