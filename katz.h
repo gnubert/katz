@@ -33,7 +33,7 @@
 // - MIN_SLEEP probably also needs some tuning
 
 #define BUF_SIZE 1000 // XXX: make sure net code can deal with larger packets
-#define DEFAULT_BW -1   // bw throttle in bps, -1 to disable
+#define DEFAULT_BW -1   // bw throttle in bytes/sec, -1 to disable
 #define MIN_SLEEP 25    // to prevent wasting CPU for overly exact bw throttling
 #define TIMEOUT 200     // when expecting data
 #define KEEPALIVE 5000  // when not expecting data

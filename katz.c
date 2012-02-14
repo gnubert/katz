@@ -1287,7 +1287,7 @@ void usage(char *prgname)
     printf("  -h    print help\n");
     printf("  -4    IPv4 only mode\n");
     printf("  -6    IPv6 only mode\n");
-    printf("  -l BW limit bandwidth (in kbps, -1 for unlimited)\n");
+    printf("  -l BW limit bandwidth (in kBytes/sec, -1 for unlimited)\n");
     printf("  -k S  keepalive timeout (in seconds, default %i)\n", KEEPALIVE/1000);
     printf("\n");
     exit(EXIT_SUCCESS);
