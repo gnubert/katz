@@ -28,9 +28,9 @@ USAGE:
   Due to packet loss and reordering, the rate for data passing through
   katz will be somewhat slower depending on the quality of the link.
   katz also has a minimum overhead of 10 bytes per kilobyte.
-- Use -a <timeout in milliseconds> to set the timeout for data
-  acknowledgements. This should be set to somewhat above the round
-  trip time between the hosts. Properly settings this value has
+- Use -t <timeout in milliseconds> to set the timeout for data
+  acknowledgements. This should be set to a multiple of the round
+  trip time between the peers. Properly settings this value has
   significant influence on the data rates katz will achieve.
   This option will vanish at some point because it makes more sense
   for katz to set this value on its own.
