@@ -314,7 +314,7 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
     while (q != NULL) {
         /* not sent ever? */
         if ((q->sent.tv_sec == 0) && (q->sent.tv_nsec == 0)) {
-            if (n != NULL) {
+            if (n == NULL) {
                 n = q;
                 break;
             }
@@ -346,12 +346,10 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
     /* timeout > new > oldest > first */
     if (e != NULL) {
         debug("(timeout)");
-        fprintf(stderr, "T%i,", e->seq);
         q = e;
     }
     else if (n != NULL) {
         debug("(new)");
-        fprintf(stderr, "n");
         q = n;
     }
     else if (o != NULL) {
@@ -522,9 +520,6 @@ inline int smallest_oq_timeout (struct katzconn *conn)
         t = 0;
 
     debug("time to next timeout: %i\n", t);
-
-    if (t>0)
-        fprintf(stderr, "t");
 
     return t;
 }
@@ -1185,17 +1180,13 @@ void katz_peer(struct katzparm *kp)
         print_katzconn(&conn);
 #endif 
 
-        if ((timeout = smallest_oq_timeout(&conn))==0) {
-            pfd[KSO].events = POLLOUT;
-            //fprintf(stderr, "^");
-        }
-        else if (conn.outstanding_ack) {
+        if ( ((timeout = smallest_oq_timeout(&conn))==0)
+                || (conn.outstanding_ack)) {
             pfd[KSO].events = POLLOUT;
             //fprintf(stderr, "^");
         }
         else {
             //debug("v");
-            //fprintf(stderr, "v");
             pfd[KSO].events = 0;
         }
 
