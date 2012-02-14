@@ -118,6 +118,7 @@ struct katzparm {
     char *dstport;
     int  ai_family;
     int  keepalive;
+    int  timeout;
     int  bw;
 };
 

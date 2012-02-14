@@ -1090,7 +1090,7 @@ void katz_init_connection(
     conn->flag = KNIL;
     conn->bwlim = kp->bw;
     conn->keepalive = kp->keepalive;
-    conn->timeout = TIMEOUT;
+    conn->timeout = kp->timeout;
     conn->bwrate = 0;
     conn->last_check = time(NULL);
     conn->ipfd = ipfd;
@@ -1289,6 +1289,7 @@ void usage(char *prgname)
     printf("  -6    IPv6 only mode\n");
     printf("  -l BW limit bandwidth (in kBytes/sec, -1 for unlimited)\n");
     printf("  -k S  keepalive timeout (in seconds, default %i)\n", KEEPALIVE/1000);
+    printf("  -t ms acknowledgement timeout (in milliseconds, default %i)\n", TIMEOUT);
     printf("\n");
     exit(EXIT_SUCCESS);
 }
@@ -1300,6 +1301,7 @@ int main(int argc, char **argv)
 
     paras.ai_family = PF_UNSPEC;
     paras.keepalive = KEEPALIVE;
+    paras.timeout = TIMEOUT;
     paras.bw = DEFAULT_BW;
 
     for (arg_index = 1; arg_index < argc; arg_index++) {
@@ -1320,6 +1322,12 @@ int main(int argc, char **argv)
                 paras.keepalive = atoi(argv[++arg_index]) * 1000;
             else
                 errx(1, "missing parameter for keepalive");
+        }
+        else if (strcmp(argv[arg_index], "-t") == 0) {
+            if (argc>arg_index)
+                paras.timeout = atoi(argv[++arg_index]);
+            else
+                errx(1, "missing parameter for timeout");
         }
         else
             break;
