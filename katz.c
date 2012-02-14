@@ -306,31 +306,37 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
     if(clock_gettime(CLOCK_MONOTONIC, &now) == -1)
         err(1, "clock_gettime");
 
-    q = conn->oq;
-    e = NULL;
-    n = NULL;
-    o = NULL;
+    q = conn->oq;   // current queue element
+    e = NULL;       // element with highest timeout
+    n = NULL;       // first unsent element
+    o = NULL;       // element least recently sent
 
     while (q != NULL) {
         /* not sent ever? */
-        if (q->sent.tv_sec == 0)
-            n = q;
-        /* timeout expired? */
-        else if ((q->sent.tv_sec + (time_t)(conn->timeout / 1000) > now.tv_sec)
-                && (q->sent.tv_nsec + (conn->timeout * 1000000) > now.tv_nsec)) {
-            /* save first timeout element for comparison */
-            if (e == NULL)
-                e = q;
-            /* more so, then the last timeout we investigated?> */
-            else if (e->sent.tv_sec < q->sent.tv_sec) {
-                debug("there really was data later in the queue that timed out earlier\n");
-                e = q;
+        if ((q->sent.tv_sec == 0) && (q->sent.tv_nsec == 0)) {
+            if (n != NULL) {
+                n = q;
+                break;
             }
         }
-        if (o==NULL || (q->sent.tv_sec != 0 &&
-                ((q->sent.tv_sec < o->sent.tv_sec)
-                && (q->sent.tv_sec < o->sent.tv_nsec)))) {
-            o = q;
+        /* timeout expired? */
+        else {
+            if (m_tsm(&q->sent, &now) > conn->timeout) {
+                /* save first timeout element for comparison */
+                if (e == NULL) {
+                    e = q;
+                }
+                /* more so, then the last timeout we investigated? (should not happen) */
+                else if (m_tsm(&e->sent, &q->sent) < 0) {
+                    debug("there really was data later in the queue that timed out earlier\n");
+                    e = q;
+                }
+            }
+            if (o==NULL || (q->sent.tv_sec != 0 &&
+                        ((q->sent.tv_sec < o->sent.tv_sec)
+                         && (q->sent.tv_sec < o->sent.tv_nsec)))) {
+                o = q;
+            }
         }
 
         q = q->next;
@@ -340,10 +346,12 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
     /* timeout > new > oldest > first */
     if (e != NULL) {
         debug("(timeout)");
+        fprintf(stderr, "T%i,", e->seq);
         q = e;
     }
     else if (n != NULL) {
         debug("(new)");
+        fprintf(stderr, "n");
         q = n;
     }
     else if (o != NULL) {
@@ -355,6 +363,15 @@ inline struct katzq *katzconn_getq(struct katzconn *conn)
     }
     if (q != NULL)
         clock_gettime(CLOCK_MONOTONIC, &q->sent);
+
+#ifdef DEBUG
+    debug("oq is now seq(sent.sec+sent.nsec): ");
+
+    for (e = conn->oq; e!=NULL; e = e->next) {
+        debug("%i(%i+%i), ", e->seq, (int)e->sent.tv_sec, (int)e->sent.tv_nsec);
+    }
+    debug("\n");
+#endif
 
 #ifdef DEBUG
     debug("returning oq element:\n");
@@ -505,6 +522,9 @@ inline int smallest_oq_timeout (struct katzconn *conn)
         t = 0;
 
     debug("time to next timeout: %i\n", t);
+
+    if (t>0)
+        fprintf(stderr, "t");
 
     return t;
 }
@@ -735,8 +755,10 @@ int katz_process_in(struct katzconn *conn)
         katzconn_process_ack(conn, p.ack);
     }
     else {
-        /* XXX: need some way to decide wether SEQ was lost */
-
+        /* XXX:
+         * could use a better way to decide wether SEQ was lost, maybe
+         * introduce NACK
+         */
         if (conn->n_oq > 0)
             conn->outstanding_ack = 1;
         else
@@ -1163,13 +1185,17 @@ void katz_peer(struct katzparm *kp)
         print_katzconn(&conn);
 #endif 
 
-        if ( ((timeout = smallest_oq_timeout(&conn))==0)
-                || (conn.outstanding_ack)
-                ) {
+        if ((timeout = smallest_oq_timeout(&conn))==0) {
             pfd[KSO].events = POLLOUT;
-            //debug("^");
-        } else {
+            //fprintf(stderr, "^");
+        }
+        else if (conn.outstanding_ack) {
+            pfd[KSO].events = POLLOUT;
+            //fprintf(stderr, "^");
+        }
+        else {
             //debug("v");
+            //fprintf(stderr, "v");
             pfd[KSO].events = 0;
         }
 
@@ -1188,7 +1214,7 @@ void katz_peer(struct katzparm *kp)
             
 
         // KSO
-        if (pfd[KSO].revents & POLLOUT) {
+        if ((pfd[KSO].revents & POLLOUT) || (nfds == 0)) {
             katz_process_out(&conn);
         }
         // KSI

@@ -124,6 +124,7 @@ struct katzparm {
 
 /**
  * Return difference between (struct timespec*) t2 and t1.
+ * (The result is positive if t1 is older than t2)
  */
 #define m_tsm(t1, t2) \
     ( \
