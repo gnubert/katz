@@ -34,6 +34,17 @@ USAGE:
   significant influence on the data rates katz will achieve.
   This option will vanish at some point because it makes more sense
   for katz to set this value on its own.
+- Use -q <count> to set the maximum number of packets in the outgoing
+  queue. Since packets have a payload of 1000 bytes at the moment,
+  count*1000 roughly corresponds to the "window size" in TCP.
+  The data rate katz can achieve is bound by the number of packets
+  that are in transit (in the outgoing queue). Therefore, if you have
+  a high RTT between peers and want to transmit at high rates, you
+  will need to increase the queue length.
+  Due to poor handling of incoming packets, the number of packets in
+  transit also leads to higher load for the receiving peer at the
+  moment. So, just increasing this won't do.
+  As with the timeout option, this option will vanish at some point.
 
 Here is a list of fun things to do with katz:
 

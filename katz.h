@@ -119,6 +119,7 @@ struct katzparm {
     int  ai_family;
     int  keepalive;
     int  timeout;
+    int  oq_maxlen;
     int  bw;
 };
 

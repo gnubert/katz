@@ -1121,7 +1121,7 @@ void katz_init_connection(
     conn->oq = NULL;
     conn->oq_last = NULL;
     conn->n_oq = 0;
-    conn->oq_maxlen = MAXQLEN;
+    conn->oq_maxlen = kp->oq_maxlen;
     
     conn->sock = connected_udp_socket(kp);
     if (conn->sock == -1)
@@ -1304,9 +1304,10 @@ void usage(char *prgname)
     printf("  -h    print help\n");
     printf("  -4    IPv4 only mode\n");
     printf("  -6    IPv6 only mode\n");
-    printf("  -l BW limit bandwidth (in kBytes/sec, -1 for unlimited)\n");
-    printf("  -k S  keepalive timeout (in seconds, default %i)\n", KEEPALIVE/1000);
+    printf("  -l kB limit bandwidth (in kBytes/sec, -1 for unlimited)\n");
+    printf("  -k s  keepalive timeout (in seconds, default %i)\n", KEEPALIVE/1000);
     printf("  -t ms acknowledgement timeout (in milliseconds, default %i)\n", TIMEOUT);
+    printf("  -q n  maximum number of packets in outgoing queue (default %i)\n", MAXQLEN);
     printf("\n");
     exit(EXIT_SUCCESS);
 }
@@ -1319,6 +1320,7 @@ int main(int argc, char **argv)
     paras.ai_family = PF_UNSPEC;
     paras.keepalive = KEEPALIVE;
     paras.timeout = TIMEOUT;
+    paras.oq_maxlen = MAXQLEN;
     paras.bw = DEFAULT_BW;
 
     for (arg_index = 1; arg_index < argc; arg_index++) {
@@ -1345,6 +1347,12 @@ int main(int argc, char **argv)
                 paras.timeout = atoi(argv[++arg_index]);
             else
                 errx(1, "missing parameter for timeout");
+        }
+        else if (strcmp(argv[arg_index], "-q") == 0) {
+            if (argc>arg_index)
+                paras.oq_maxlen = atoi(argv[++arg_index]);
+            else
+                errx(1, "missing parameter for maximum queue length");
         }
         else
             break;
