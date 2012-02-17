@@ -534,53 +534,45 @@ inline int smallest_oq_timeout (struct katzconn *conn)
 
 
 /*
- * Receives and unmarshalls a katzpack.
+ * Receives and unmarshalls a katzpack via recvmsg.
  * Returns -1 on error, data length otherwise.
  */
-int recv_katzpack(int sock, struct katzpack *p)
+int katzpack_recvmsg(int sock, struct katzpack *p)
 {
-    char *buf, *data;
-    int off;
+    char *data;
     int nread;
-    uint32_t v;
-    int vl;
-
-    if ((buf = calloc(1, sizeof(struct katzpack) + BUF_SIZE)) == NULL)
-        err(1, "calloc");
+    struct msghdr mh;
+    struct iovec iov[2];
+    
     if ((data = calloc(1, BUF_SIZE)) == NULL)
         err(1, "calloc");
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_iovlen = 2;
+    mh.msg_iov = iov;
 
-    if ((nread = recv(sock, buf, sizeof(struct katzpack) + BUF_SIZE, 0)) == -1) {
-        debug( "failed to receive packet\n");
-        free(buf);
+    iov[0].iov_base = p;
+    iov[0].iov_len = sizeof(struct katzpack);
+    iov[1].iov_base = data;
+    iov[1].iov_len = BUF_SIZE;
+
+    p->flag = KNIL;
+    if ((nread = recvmsg(sock, &mh, 0)) == -1) {
+        debug("failed to receive packet\n");
+        p->data = data;
         return -1;
     }
-
-    vl = sizeof(p->seq);
-    memcpy(&v, buf, vl);
-    p->seq = ntohl(v);
-    off = vl;
-
-    vl = sizeof(p->ack);
-    memcpy(&v, buf+off, vl);
-    p->ack = ntohl(v);
-    off += vl;
-
-    p->flag = buf[off];
-
-    vl = nread - sizeof(struct katzpack);
     p->data = data;
-    memcpy(p->data, buf+sizeof(struct katzpack), vl);
+    p->seq = ntohl(p->seq);
+    p->ack = ntohl(p->ack);
 
-    //debug("<(%i,%i) ", p->seq, p->ack);
+    nread -= sizeof(struct katzpack);
 
 #ifdef DEBUG
-    debug("received packet (datalength %i) :\n", vl);
+    debug("received packet (datalength %i) :\n", nread);
     print_katzpack(p);
 #endif
-    free(buf);
 
-    return vl;
+    return nread;
 }
 
 /*
@@ -692,10 +684,10 @@ int katz_process_in(struct katzconn *conn)
     p.seq = 0;
     p.data = NULL;
 
-    nread = recv_katzpack(conn->sock, &p);
+    nread = katzpack_recvmsg(conn->sock, &p);
     debug("processing packet\n");
     if (nread == -1)
-        errx(1, "recv_katzpack");
+        errx(1, "katzpack_recvmsg");
 
     if(clock_gettime(CLOCK_MONOTONIC, &conn->last_event))
         err(1, "clock_gettime");
@@ -713,7 +705,7 @@ int katz_process_in(struct katzconn *conn)
             debug("KFIN: disable KSI\n");
             return -1;
         case KNIL: // XXX:
-            errx(1, "got strange packet (KNIL) or recv_katzpack failed");
+            errx(1, "got strange packet (KNIL) or katzpack_recvmsg failed");
         case KACK:
             debug("KACK: parsing...\n");
             break;
@@ -990,16 +982,12 @@ int katz_connect(struct katzconn *conn)
     if (conn->flag != KNIL)
         return -1;
 
-    out.seq = 0;
-    out.ack = 0;
-    out.flag = KSYN;
-    out.data = NULL;
-
-    conn->flag = KSYN;
-    conn->seq = out.seq;
-
     custom_error = 0;
     for (r=0; r < MAX_RETRIES; r++) {
+        out.seq = conn->seq;
+        out.ack = conn->ack+1;
+        out.flag = KSYN;
+        out.data = NULL;
 
         debug("sending SYN\n");
         /* send SYN */
@@ -1011,7 +999,7 @@ int katz_connect(struct katzconn *conn)
 
         debug("receiving datagram\n");
         /* receive ACK */
-        if ((nread = recv_katzpack(conn->sock, &in)) == -1) {
+        if ((nread = katzpack_recvmsg(conn->sock, &in)) == -1) {
             cause = "recv";
             free(in.data);
             sleep(1);
