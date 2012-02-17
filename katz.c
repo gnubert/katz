@@ -582,18 +582,32 @@ int recv_katzpack(int sock, struct katzpack *p)
 
     return vl;
 }
+
 /*
- * Marshalls and sends a katzpack.
+ * Marshalls (inplace) and sends a katzpack via sendmsg.
  * Returns -1 on error.
  */
-int send_katzpack(struct katzconn *conn, struct katzpack *p, int len)
+int katzpack_sendmsg(struct katzconn *conn, struct katzpack *p, int len)
 {
-    char *buf;
-    int off;
-    uint32_t v;
-    int vl;
-    int nwritten;
-    int delay;
+    int i, delay;
+    struct msghdr mh;
+    struct iovec iov[2];
+
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_iov = iov;
+
+    if (len == 0)
+        mh.msg_iovlen = 1;
+    else
+        mh.msg_iovlen = 2;
+
+    iov[0].iov_base = p;
+    iov[0].iov_len = sizeof(struct katzpack);
+    iov[1].iov_len = len;
+    iov[1].iov_base = p->data;
+
+    p->seq = htonl(p->seq);
+    p->ack = htonl(p->ack);
 
     // throttle outgoing traffic
     delay = katzconn_sleep(conn, len + sizeof(struct katzpack));
@@ -607,46 +621,18 @@ int send_katzpack(struct katzconn *conn, struct katzpack *p, int len)
         }
     }
 
-    if ((buf = calloc(1, sizeof(struct katzpack) + len)) == NULL)
-        err(1, "calloc");
+    i = sendmsg(conn->sock, &mh, 0);
 
-    v = htonl(p->seq);
-    vl = sizeof(p->seq);
-    memcpy(buf, &v, vl);
-    off = vl;
-
-    v = htonl(p->ack);
-    vl = sizeof(p->ack);
-    memcpy(&buf[off], &v, vl);
-    off += vl;
-
-    buf[off] = p->flag;
-    off += sizeof(p->flag);
-    
-    if (p->data != NULL && len != 0)
-        memcpy(buf + sizeof(struct katzpack), p->data, len);
-
-    nwritten = send(conn->sock, buf, sizeof(struct katzpack) + len, 0);
-    vl = nwritten - sizeof(struct katzpack);
-
-#ifdef DEBUG
-    if (nwritten != -1)
-        debug("sent packet:\n");
-    else
-        debug("failed sending packet:\n");
-    print_katzpack(p);
-#endif
-
-    free(buf);
-
-    if (nwritten == -1) {
-        //debug(">X(%i,%i) ", p->seq, p->ack);
-        return -1;
+    if (i != -1) {
+        i -= sizeof(struct katzpack);
+        debug("sent %i bytes\n", i);
     } else {
-        //debug(">(%i,%i) ", p->seq, p->ack);
-        return vl;
+        debug("sendmsg failed\n", i);
     }
+
+    return i;
 }
+
 
 int katz_process_out(struct katzconn *conn)
 {
@@ -677,9 +663,9 @@ int katz_process_out(struct katzconn *conn)
     p.flag = KACK;
     p.ack = conn->ack+1; // XXX: check for overflow
 
-    ret = send_katzpack(conn, &p, len);
+    ret = katzpack_sendmsg(conn, &p, len);
     if (ret == -1)
-        errx(1, "send_katzpack failed");
+        errx(1, "katzpack_sendmsg failed");
     else {
         if(clock_gettime(CLOCK_MONOTONIC, &conn->last_event))
             err(1, "clock_gettime");
@@ -1017,7 +1003,7 @@ int katz_connect(struct katzconn *conn)
 
         debug("sending SYN\n");
         /* send SYN */
-        if (send_katzpack(conn, &out, 0) == -1) {
+        if (katzpack_sendmsg(conn, &out, 0) == -1) {
             cause = "send";
             sleep(1);
             continue;
@@ -1044,8 +1030,8 @@ int katz_connect(struct katzconn *conn)
                 out.flag = KSYN;
                 out.seq = conn->seq;
                 out.ack = conn->ack;
-                if (send_katzpack(conn, &out, 0) == -1)
-                    errx(1, "send_katzpack");
+                if (katzpack_sendmsg(conn, &out, 0) == -1)
+                    errx(1, "katzpack_sendmsg");
             }
             else {
                 debug("not sending SYN reply\n");
@@ -1085,9 +1071,9 @@ void katz_disconnect(struct katzconn *conn)
     out.data = NULL;
 
     conn->flag = KFIN;
-    send_katzpack(conn, &out, 0);
-    send_katzpack(conn, &out, 0);
-    send_katzpack(conn, &out, 0);
+    katzpack_sendmsg(conn, &out, 0);
+    katzpack_sendmsg(conn, &out, 0);
+    katzpack_sendmsg(conn, &out, 0);
     // TODO: proper tear down - i.e. wait for incoming FIN?
 
     close(conn->sock);

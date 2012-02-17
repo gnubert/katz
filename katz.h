@@ -149,7 +149,7 @@ inline int katzconn_sleep (struct katzconn *conn, int len);
 inline int katzconn_keepalive(struct katzconn *conn);
 
 int recv_katzpack(int sock, struct katzpack *p);
-int send_katzpack(struct katzconn *conn, struct katzpack *p, int len);
+int katzpack_sendmsg(struct katzconn *conn, struct katzpack *p, int len);
 int katz_process_out(struct katzconn *conn);
 int katz_process_in(struct katzconn *conn);
 
