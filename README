@@ -23,7 +23,7 @@ USAGE:
   unusable for anything else.
   The limit is only enforced in the process that was started with this
   limit. Thus, in order to limit both traffic directions you will have
-  to specify a limit on both hosts.-h
+  to specify a limit on both hosts.
   Note, that this limits the bandwidth katz uses, not the data rate.
   Due to packet loss and reordering, the rate for data passing through
   katz will be somewhat slower depending on the quality of the link.
