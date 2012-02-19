@@ -251,6 +251,12 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
         conn->iq = e;
         conn->iq_last = e;
     }
+    else if (conn->iq_last->seq < seq) {
+        debug("early appending to end of iq\n");
+        conn->iq_last->next = e;
+        conn->iq_last = e;
+        conn->n_iq++;
+    }
     else {
         for (p=conn->iq; p!=NULL; p=p->next) {
             if (p->seq == seq) { // dup
@@ -275,7 +281,9 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
                 break;
             }
         }
+        // this should not happen
         if (p == NULL) { // went through whole queue
+            debug("wait what?\n");
             pp->next = e;
             conn->n_iq++;
         }
