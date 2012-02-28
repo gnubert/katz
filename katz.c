@@ -217,17 +217,27 @@ inline void katzconn_append_oq(struct katzconn *conn, char *data, int len)
 }
 
 /**
- * Insert data with seq into conn.iq so that seq numbers are ordered
- * with lowest element first.
- * Free data if duplicate seq.
+ * Insert data with seq into conn.iq.
+ * Free data if not adding.
  */
 inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int seq)
 {
-    struct katzq *e, *p, *pp;
+    struct katzq *e, *p;
+
+    if (seq <= conn->ack) {
+        free(data);
+        debug("got late packet\n");
+        return;
+    }
+    HASH_FIND(hh, conn->iq, &seq, sizeof(uint32_t), p);
+    if (p != NULL) {
+        free(data);
+        debug("got duplicate packet\n");
+        return;
+    }
+
     if ((e = calloc(1, sizeof(struct katzq))) == NULL)
         err(1, "calloc");
-
-
     e->data = data;
     e->len = len;
     e->seq = seq;
@@ -235,62 +245,14 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
     e->sent.tv_sec = 0;
     e->sent.tv_nsec = 0;
 
-#ifdef DEBUG
     debug("Queueing element:\n");
+#ifdef DEBUG
     print_katzq(e);
 #endif
 
-    if (seq <= conn->ack) {
-        debug("late packet");
-        return;
-    }
+    HASH_ADD(hh, conn->iq, seq, sizeof(uint32_t), e);
+    conn->n_iq += 1;
     
-    pp = NULL;
-    if (conn->n_iq == 0) {
-        conn->n_iq = 1;
-        conn->iq = e;
-        conn->iq_last = e;
-    }
-    else {
-        for (p=conn->iq; p!=NULL; p=p->next) {
-            if (p->seq == seq) { // dup
-                free_katzq(e);
-                break;
-            }
-            if (p->seq < seq) { // too early in q
-                pp = p;
-                continue;
-            }
-            if (p->seq > seq) { // too far in q
-                if (pp != NULL) { // not first element in q
-                    pp->next = e;
-                    e->next = p;
-                    conn->n_iq++;
-                }
-                else { // first element in q
-                    e->next = p;
-                    conn->iq = e;
-                    conn->n_iq++;
-                }
-                break;
-            }
-        }
-        if (p == NULL) { // went through whole queue
-            pp->next = e;
-            conn->n_iq++;
-        }
-    }
-
-
-#ifdef DEBUG
-    debug("iq is now (seq): ");
-
-    for (p = conn->iq; p!=NULL; p = p->next) {
-        debug("%i, ", p->seq);
-    }
-    debug("\n");
-#endif
-
 }
 
 /**
@@ -895,6 +857,7 @@ int connected_udp_socket(struct katzparm *kp)
 int katz_read(struct katzconn *conn, char *buf, int len)
 {
     int nread;
+    uint32_t next;
     struct katzq *q;
 
     if (conn->flag == KFIN)
@@ -903,37 +866,31 @@ int katz_read(struct katzconn *conn, char *buf, int len)
     if (conn->flag != KACK)
         return -1;
 
-    if (conn->n_iq > 0) {
-        q = conn->iq;
-        if (len < q->len)
-            errx(1, "not handling small reads properly atm");
+    next = conn->ack + 1;
 
-        if (conn->iq->seq > conn->ack+1) { // only out of order data available
-            return -2;
-        }
-        nread = q->len;
-        memcpy(buf, conn->iq->data, nread);
-        
-        if (conn->iq_last == q)
-            conn->iq_last = NULL;
-        conn->iq = free_katzq(q);
-        conn->n_iq--;
-        conn->ack++;
-        conn->outstanding_ack = 1;
-
-#ifdef DEBUG
-        debug("returning %i bytes from conn->iq which is now\n", nread);
-        print_katzq(conn->iq);
-#endif
-
-        return nread;
-    }
-    else {
-        debug("not returning bytes from conn->iq, it contains %i elements\n", conn->n_iq);
+    HASH_FIND(hh, conn->iq, &next, sizeof(uint32_t), q);
+    if (q == NULL) {
+        debug("next seq not in iq\n");
         return -2;
     }
 
-    return -1;
+    if (len < q->len)
+        errx(1, "not handling small reads properly atm");
+
+    nread = q->len;
+    memcpy(buf, q->data, nread);
+
+    HASH_DELETE(hh, conn->iq, q);
+    free_katzq(q);
+    conn->n_iq--;
+    conn->ack++;
+    conn->outstanding_ack = 1;
+
+#ifdef DEBUG
+    debug("returning %i bytes from conn->iq\n", nread);
+#endif
+
+    return nread;
 }
 
 
@@ -1088,7 +1045,6 @@ void katz_init_connection(
     conn->opfd = opfd;
 
     conn->iq = NULL;
-    conn->iq_last = NULL;
     conn->n_iq = 0;
     conn->outstanding_ack = 0;
 
