@@ -20,7 +20,7 @@
 
 #include <sys/time.h>
 #include <time.h>
-#include <uthash.h>
+#include "uthash.h"
 
 // TODO:
 // - BUF_SIZE:
@@ -102,11 +102,12 @@ struct katzconn {
     // data buffers
     struct katzq    *oq;
     struct katzq    *oq_last;
-    int             n_oq;
-    int             oq_maxlen; // aka winsize
+    uint32_t        n_oq;
+    uint32_t        oq_maxlen; // aka winsize
 
     struct katzq    *iq;
-    int             n_iq;
+    uint32_t        n_iq;
+    uint32_t        iq_seq_ready;
     int             outstanding_ack;
     // TODO: implement recv win?
 };

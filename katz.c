@@ -224,9 +224,9 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
 {
     struct katzq *e, *p;
 
-    if (seq <= conn->ack) {
+    if (seq <= conn->iq_seq_ready) {
         free(data);
-        debug("got late packet\n");
+        debug("got dup/late packet\n");
         return;
     }
     HASH_FIND(hh, conn->iq, &seq, sizeof(uint32_t), p);
@@ -252,6 +252,13 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
 
     HASH_ADD(hh, conn->iq, seq, sizeof(uint32_t), e);
     conn->n_iq += 1;
+    while (conn->iq_seq_ready == (seq-1)) {
+        conn->iq_seq_ready = seq;
+        seq += 1;
+        HASH_FIND(hh, conn->iq, &seq, sizeof(uint32_t), p);
+        if (p == NULL)
+            break;
+    }
     
 }
 
@@ -615,7 +622,9 @@ int katz_process_out(struct katzconn *conn)
     }
 
     p.flag = KACK;
-    p.ack = conn->ack+1; // XXX: check for overflow
+    // XXX: experimental
+    //p.ack = conn->ack+1; // XXX: check for overflow
+    p.ack = conn->iq_seq_ready+1;
 
     ret = katzpack_sendmsg(conn, &p, len);
     if (ret == -1)
@@ -676,7 +685,7 @@ int katz_process_in(struct katzconn *conn)
     }
 
 
-    if (p.seq > conn->ack) { // got new data, fill buffer
+    if (p.seq > conn->iq_seq_ready) { // got new data, fill buffer
         debug("appending new data to iq\n");
         katzconn_insert_iq(conn, p.data, nread, p.seq);
     }
@@ -1046,6 +1055,7 @@ void katz_init_connection(
 
     conn->iq = NULL;
     conn->n_iq = 0;
+    conn->iq_seq_ready = 0;
     conn->outstanding_ack = 0;
 
     conn->oq = NULL;
@@ -1141,7 +1151,7 @@ void katz_peer(struct katzparm *kp)
         // KSI
         if (pfd[KSI].revents & POLLIN) {
             katz_process_in(&conn);
-            if (conn.n_iq > 0)
+            if (conn.iq_seq_ready > conn.ack)
                 pfd[KFO].events = POLLOUT; // reenable KFO
             if (conn.n_oq < conn.oq_maxlen)
                 pfd[KFI].events = POLLIN; // reenable KFI
@@ -1201,7 +1211,7 @@ void katz_peer(struct katzparm *kp)
                 errx(1, "not handling output buffer clearing properly ATM");
             else {
                 obuflen = 0;
-                if (conn.n_iq == 0)
+                if (conn.iq_seq_ready == conn.ack)
                     pfd[KFO].events = 0; // disable KFO
             }
         }
