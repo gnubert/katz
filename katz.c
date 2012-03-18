@@ -529,7 +529,7 @@ int katzpack_recvmsg(int sock, struct katzpack *p)
     mh.msg_iov = iov;
 
     iov[0].iov_base = p;
-    iov[0].iov_len = sizeof(struct katzpack);
+    iov[0].iov_len = KPHSIZE;
     iov[1].iov_base = data;
     iov[1].iov_len = BUF_SIZE;
 
@@ -543,7 +543,7 @@ int katzpack_recvmsg(int sock, struct katzpack *p)
     p->seq = ntohl(p->seq);
     p->ack = ntohl(p->ack);
 
-    nread -= sizeof(struct katzpack);
+    nread -= KPHSIZE;
 
 #ifdef DEBUG
     debug("received packet (datalength %i) :\n", nread);
@@ -572,7 +572,7 @@ int katzpack_sendmsg(struct katzconn *conn, struct katzpack *p, int len)
         mh.msg_iovlen = 2;
 
     iov[0].iov_base = p;
-    iov[0].iov_len = sizeof(struct katzpack);
+    iov[0].iov_len = KPHSIZE;
     iov[1].iov_len = len;
     iov[1].iov_base = p->data;
 
@@ -580,7 +580,7 @@ int katzpack_sendmsg(struct katzconn *conn, struct katzpack *p, int len)
     p->ack = htonl(p->ack);
 
     // throttle outgoing traffic
-    delay = katzconn_sleep(conn, len + sizeof(struct katzpack));
+    delay = katzconn_sleep(conn, len + KPHSIZE);
     if (delay>0) {
         if (delay<MIN_SLEEP)
             delay = MIN_SLEEP;
@@ -594,7 +594,7 @@ int katzpack_sendmsg(struct katzconn *conn, struct katzpack *p, int len)
     i = sendmsg(conn->sock, &mh, 0);
 
     if (i != -1) {
-        i -= sizeof(struct katzpack);
+        i -= KPHSIZE;
         debug("sent %i bytes\n", i);
     } else {
         debug("sendmsg failed\n", i);
@@ -896,7 +896,11 @@ int katz_read(struct katzconn *conn, char *buf, int len)
         errx(1, "not handling small reads properly atm");
 
     nread = q->len;
-    memcpy(buf, q->data, nread);
+    if (nread > 0) {
+        memcpy(buf, q->data, nread);
+    } else {
+        debug("not copying <=0 bytes from seq %i\n", q->seq);
+    }
 
     free(q->data);
     q->seq = 0;

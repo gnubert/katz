@@ -66,6 +66,7 @@ struct katzpack {
     uint8_t  flag;
     char*    data;
 };
+#define KPHSIZE 9
 
 struct katzq {
     char            *data;
