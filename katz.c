@@ -222,41 +222,49 @@ inline void katzconn_append_oq(struct katzconn *conn, char *data, int len)
  */
 inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int seq)
 {
-    struct katzq *e, *p;
+    struct katzq *p;
 
     if (seq <= conn->iq_seq_ready) {
         free(data);
-        debug("got dup/late packet\n");
+        debug("got late dup packet\n");
         return;
     }
-    HASH_FIND(hh, conn->iq, &seq, sizeof(uint32_t), p);
-    if (p != NULL) {
+    if (seq - conn->ack > conn->iq_size) {
+        free(data);
+        fprintf(stderr, "iq full, dropping packet\n");
+        debug("seq: %i, ack: %i, qsize: %i, sready: %i\n",
+                seq, conn->ack, conn->iq_size, conn->iq_seq_ready);
+        return;
+    }
+
+    p = (conn->iq + (seq%conn->iq_size));
+    if (p->seq != 0) {
         free(data);
         debug("got duplicate packet\n");
         return;
     }
 
-    if ((e = calloc(1, sizeof(struct katzq))) == NULL)
-        err(1, "calloc");
-    e->data = data;
-    e->len = len;
-    e->seq = seq;
-    e->next = NULL;
-    e->sent.tv_sec = 0;
-    e->sent.tv_nsec = 0;
+    p->data = data;
+    p->len = len;
+    p->seq = seq;
+    p->next = NULL;
+    p->sent.tv_sec = 0;
+    p->sent.tv_nsec = 0;
 
     debug("Queueing element:\n");
 #ifdef DEBUG
-    print_katzq(e);
+    //print_katzq(e);
 #endif
-
-    HASH_ADD(hh, conn->iq, seq, sizeof(uint32_t), e);
     conn->n_iq += 1;
+
+    /* set iq_seq_ready to highest consecutive seq number */
     while (conn->iq_seq_ready == (seq-1)) {
         conn->iq_seq_ready = seq;
         seq += 1;
-        HASH_FIND(hh, conn->iq, &seq, sizeof(uint32_t), p);
-        if (p == NULL)
+        p = (conn->iq + (seq%conn->iq_size));
+        if (p->seq == 0)
+            break;
+        if (seq - conn->ack > conn->iq_size)
             break;
     }
     
@@ -622,9 +630,9 @@ int katz_process_out(struct katzconn *conn)
     }
 
     p.flag = KACK;
-    // XXX: experimental
-    //p.ack = conn->ack+1; // XXX: check for overflow
-    p.ack = conn->iq_seq_ready+1;
+    p.ack = conn->ack+1; // XXX: check for overflow
+    // XXX: experimental -- only makes sense if iq can grow
+    //p.ack = conn->iq_seq_ready+1;
 
     ret = katzpack_sendmsg(conn, &p, len);
     if (ret == -1)
@@ -877,8 +885,8 @@ int katz_read(struct katzconn *conn, char *buf, int len)
 
     next = conn->ack + 1;
 
-    HASH_FIND(hh, conn->iq, &next, sizeof(uint32_t), q);
-    if (q == NULL) {
+    q = (conn->iq + (next%conn->iq_size));
+    if (q->seq == 0) {
         debug("next seq not in iq\n");
         return -2;
     }
@@ -889,8 +897,8 @@ int katz_read(struct katzconn *conn, char *buf, int len)
     nread = q->len;
     memcpy(buf, q->data, nread);
 
-    HASH_DELETE(hh, conn->iq, q);
-    free_katzq(q);
+    free(q->data);
+    q->seq = 0;
     conn->n_iq--;
     conn->ack++;
     conn->outstanding_ack = 1;
@@ -1057,6 +1065,11 @@ void katz_init_connection(
     conn->n_iq = 0;
     conn->iq_seq_ready = 0;
     conn->outstanding_ack = 0;
+
+    conn->iq = calloc(sizeof(struct katzq), MAXQLEN);
+    if (conn->iq == NULL)
+        err(1, "calloc");
+    conn->iq_size = MAXQLEN;
 
     conn->oq = NULL;
     conn->oq_last = NULL;

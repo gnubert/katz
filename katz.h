@@ -20,7 +20,6 @@
 
 #include <sys/time.h>
 #include <time.h>
-#include "uthash.h"
 
 // TODO:
 // - BUF_SIZE:
@@ -74,7 +73,6 @@ struct katzq {
     int             seq;
     struct timespec sent;
     struct katzq    *next;
-    UT_hash_handle  hh;
 };
 
 
@@ -109,6 +107,7 @@ struct katzconn {
     uint32_t        n_iq;
     uint32_t        iq_seq_ready;
     int             outstanding_ack;
+    uint32_t        iq_size;
     // TODO: implement recv win?
 };
 
