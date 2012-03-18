@@ -27,6 +27,7 @@
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <assert.h>
@@ -781,7 +782,7 @@ int bind_socket(
     }
 #endif
 
-    freeaddrinfo(res);
+    freeaddrinfo(res0);
     return sock;
 }
 
