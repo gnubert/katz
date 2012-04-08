@@ -37,7 +37,7 @@
 #define MIN_SLEEP 25    // to prevent wasting CPU for overly exact bw throttling
 #define TIMEOUT 200     // when expecting data
 #define KEEPALIVE 5000  // when not expecting data
-#define MAXQLEN 20      // default window size
+#define MAXQLEN 200      // default window size
 
 
 
@@ -82,12 +82,14 @@ struct katzconn {
 
     // protocol state
     uint32_t    seq;
+    uint32_t    lar_count; /* last ack received count */
     uint32_t    ack;
     uint8_t     flag;
     int         keepalive; // how often to send packets in light of no traffic at all
     int         timeout;   // time after which a packet is deemed lost
     struct timespec
                 last_event; // time of last recv/send for use with keepalive
+    uint32_t    dups;       // duplicate counter
     
     // bandwidth state
     int         bwlim;
@@ -101,6 +103,10 @@ struct katzconn {
     // data buffers
     struct katzq    *oq;
     struct katzq    *oq_last;
+    /* always set to first unsent packet in oq: */
+    struct katzq    *oq_unsent;
+    /* always set to next packet in oq to timeout: */
+    struct katzq    *oq_timeout;
     uint32_t        n_oq;
     uint32_t        oq_maxlen; // aka winsize
 

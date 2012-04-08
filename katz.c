@@ -182,12 +182,16 @@ inline void katzconn_process_ack(struct katzconn *conn, int ack)
     debug("clearing oq(oq->seq:%i/ack:%i) ", conn->oq->seq, ack);
     while ((conn->oq != NULL) && (conn->oq->seq - ack < 0)) {
         debug(".");
+        if (conn->oq_timeout == conn->oq) {
+            conn->oq_timeout = conn->oq->next;
+        }
         conn->seq = conn->oq->seq;
         conn->oq = free_katzq(conn->oq);
         conn->n_oq--;
     }
-    if (conn->oq == NULL)
+    if (conn->oq == NULL) {
         conn->oq_last = NULL;
+    }
     debug("done.\n");
 }
 
@@ -213,8 +217,96 @@ inline void katzconn_append_oq(struct katzconn *conn, char *data, int len)
         e->seq = conn->oq_last->seq+1;
         conn->oq_last->next = e;
     }
+    if (conn->oq_unsent == NULL) {
+        conn->oq_unsent = e;
+    }
     conn->oq_last = e;
     conn->n_oq++; // XXX: check for overflow
+}
+
+void grow_iq(struct katzconn *conn)
+{
+    struct katzq *nq, *oq;
+    uint32_t new_size;
+    uint32_t b1o, e1o, l1o, b1n, e1n, l1n, e2o, l2o;
+
+#ifdef DEBUG
+    uint32_t d;
+    fprintf(stderr, "iq before resize: ");
+    for (d = 0; d<conn->iq_size; d++) {
+        fprintf(stderr, " %i", (conn->iq+d)->seq);
+    }
+    fprintf(stderr, "\n");
+#endif
+
+    new_size = conn->iq_size * 2; /* XXX: we can do better */
+    debug("resizing iq to %i\n", new_size);
+
+    nq = calloc(new_size, sizeof(struct katzq));
+    if (nq == NULL) {
+        err(1, "calloc");
+    }
+    oq = conn->iq;
+
+    /*
+     * Copy old q to new q in chunks.
+     * The chunks could be truncated arbitarily - so we need to copy
+     * and fill each chunk in (up to) two pieces.
+     * old iq:      |b2o...e2o|b1o....e1o|
+     * new iq: |b2n........e2n|b1n.........e1n|
+     */
+    b1o = (conn->ack+1) % conn->iq_size;
+    e1o = conn->iq_size;
+    l1o = e1o - b1o;
+    e2o = (conn->ack+1)% conn->iq_size;
+    l2o = e2o;
+
+    b1n = (conn->ack+1) % new_size;
+    e1n = new_size;
+    l1n = e1n - b1n;
+
+    if (l1o > l1n) {
+        /* copy 1o in chunks */
+        memcpy(nq+b1n, oq+b1o, l1n *sizeof(struct katzq));
+        memcpy(nq, oq+b1o+l1n, (l1o-l1n) *sizeof(struct katzq));
+
+        /* since (new_size > conn->iq_size) 2o has to fit */
+        memcpy(nq+(l1o-l1n), oq, l2o *sizeof(struct katzq));
+    }
+    else {
+        /* copy 1o in one piece */
+        memcpy(nq+b1n, oq+b1o, l1o*sizeof(struct katzq));
+
+        if (l2o > (l1n - l1o)) {
+            /* copy 2o in two chunks if necessary */
+            if (l2o < (l1n-l1o)) {
+                /* 2o fits in rest of 1n */
+                memcpy(nq+b1n+l1o, oq, l2o *sizeof(struct katzq));
+            }
+            else {
+                /* need to chop 2o */
+                memcpy(nq+b1n+l1o, oq, (l1n-l1o) *sizeof(struct katzq));
+                memcpy(nq, oq+(l1n-l1o), (l2o - (l1n-l1o)) *sizeof(struct katzq));
+            }
+        }
+        else {
+            /* copy 2o in one chunk */
+            memcpy(nq+b1n+l1o, oq, l2o *sizeof(struct katzq));
+        }
+
+    }
+
+    free(conn->iq);
+    conn->iq = nq;
+    conn->iq_size = new_size;
+
+#ifdef DEBUG
+    fprintf(stderr, "\niq after resize: ");
+    for (d = 0; d<conn->iq_size; d++) {
+        fprintf(stderr, " %i", (conn->iq+d)->seq);
+    }
+    fprintf(stderr, "\n");
+#endif
 }
 
 /**
@@ -228,23 +320,26 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
     if (seq <= conn->iq_seq_ready) {
         free(data);
         debug("got late dup packet\n");
+        conn->dups++;
         return;
     }
     if (seq - conn->ack > conn->iq_size) {
-        free(data);
-        fprintf(stderr, "iq full, dropping packet\n");
-        debug("seq: %i, ack: %i, qsize: %i, sready: %i\n",
-                seq, conn->ack, conn->iq_size, conn->iq_seq_ready);
-        return;
+        debug("growing\n");
+        grow_iq(conn);
+    }
+    else {
+        debug("not growin\n");
     }
 
     p = (conn->iq + (seq%conn->iq_size));
     if (p->seq != 0) {
         free(data);
         debug("got duplicate packet\n");
+        conn->dups++;
         return;
     }
 
+    debug("Queueing element:\n");
     p->data = data;
     p->len = len;
     p->seq = seq;
@@ -252,7 +347,6 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
     p->sent.tv_sec = 0;
     p->sent.tv_nsec = 0;
 
-    debug("Queueing element:\n");
 #ifdef DEBUG
     //print_katzq(e);
 #endif
@@ -278,76 +372,40 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
  */
 inline struct katzq *katzconn_getq(struct katzconn *conn)
 {
-    struct katzq *q, *e, *n, *o;
+    struct katzq *q;
     struct timespec now;
     
+    q = conn->oq;   // current queue element
+
     if(clock_gettime(CLOCK_MONOTONIC, &now) == -1)
         err(1, "clock_gettime");
-
-    q = conn->oq;   // current queue element
-    e = NULL;       // element with highest timeout
-    n = NULL;       // first unsent element
-    o = NULL;       // element least recently sent
-
-    while (q != NULL) {
-        /* not sent ever? */
-        if ((q->sent.tv_sec == 0) && (q->sent.tv_nsec == 0)) {
-            if (n == NULL) {
-                n = q;
-                break;
-            }
-        }
-        /* timeout expired? */
-        else {
-            if (m_tsm(&q->sent, &now) > conn->timeout) {
-                /* save first timeout element for comparison */
-                if (e == NULL) {
-                    e = q;
-                }
-                /* more so, then the last timeout we investigated? (should not happen) */
-                else if (m_tsm(&e->sent, &q->sent) < 0) {
-                    debug("there really was data later in the queue that timed out earlier\n");
-                    e = q;
-                }
-            }
-            if (o==NULL || (q->sent.tv_sec != 0 &&
-                        ((q->sent.tv_sec < o->sent.tv_sec)
-                         && (q->sent.tv_sec < o->sent.tv_nsec)))) {
-                o = q;
-            }
-        }
-
-        q = q->next;
-    }
-
     
-    /* new > timeout > oldest > first */
-    if (n != NULL) {
-        debug("(new)");
-        q = n;
+
+    if (conn->oq_unsent != NULL) {
+        //fprintf(stderr, "n");
+        q = conn->oq_unsent; /* start with unsent packets */
+        conn->oq_unsent = q->next;
     }
-    else if (e != NULL) {
-        debug("(timeout)");
-        q = e;
-    }
-    else if (o != NULL) {
-        debug("(oldest)");
-        q = o;
+//TODO:
+//    else if (conn->lar_count > 0) {
+//        fprintf(stderr, "probably need to send least seq\n");
+//        exit(EXIT_FAILURE);
+//    }
+    else if (conn->oq_timeout != NULL ) {
+        //fprintf(stderr, ",");
+        //fprintf(stderr, "(ack: %d, oq: %d, oq_t: %d)", conn->seq, conn->oq->seq, conn->oq_timeout->seq);
+        //fprintf(stderr, " %dp", conn->lar_count);
+        q = conn->oq_timeout; /* start with first packet to timeout */
+        conn->oq_timeout = NULL;
     }
     else {
+        //fprintf(stderr, "e");
         q = conn->oq;
     }
-    if (q != NULL)
+
+    if (q != NULL) {
         clock_gettime(CLOCK_MONOTONIC, &q->sent);
-
-#ifdef DEBUG
-    debug("oq is now seq(sent.sec+sent.nsec): ");
-
-    for (e = conn->oq; e!=NULL; e = e->next) {
-        debug("%i(%i+%i), ", e->seq, (int)e->sent.tv_sec, (int)e->sent.tv_nsec);
     }
-    debug("\n");
-#endif
 
 #ifdef DEBUG
     debug("returning oq element:\n");
@@ -465,29 +523,30 @@ inline int smallest_oq_timeout (struct katzconn *conn)
     struct timespec *then;
     int t;
 
+    if (conn->oq_unsent != NULL) {
+        return 0;
+    }
+
     if(clock_gettime(CLOCK_MONOTONIC, &now))
         err(1, "clock_gettime");
 
     l = NULL;
     for (q = conn->oq; q!=NULL; q=q->next) {
-
-        if ((q->sent.tv_sec > 0) && (q->sent.tv_nsec > 0)) {
-            if (m_tsm(&now, &q->sent) < conn->timeout) {
-                if ((l == NULL) || m_tsm(&q->sent, &l->sent) < 0)
-                    l = q;
-            }
-        }
-        else { // unsent data, no time to lose!
-            debug("time to next timeout: %i\n", 0);
-            return 0;
+        if (m_tsm(&now, &q->sent) < conn->timeout) {
+            if ((l == NULL) || m_tsm(&q->sent, &l->sent) > 0)
+                l = q;
         }
     }
 
     // TODO: check for overflow
-    if (l == NULL)
+    if (l == NULL) {
         then = &conn->last_event;
-    else
+    }
+    else {
         then = &l->sent;
+        conn->oq_timeout = l;
+        debug("T:%d ", l->seq);
+    }
     t = m_tsm(&now, then);
     if (l == NULL)
         t += conn->keepalive;
@@ -563,6 +622,8 @@ int katzpack_sendmsg(struct katzconn *conn, struct katzpack *p, int len)
     struct msghdr mh;
     struct iovec iov[2];
 
+    //fprintf(stderr, "sending %d bytes payload\n", len);
+
     memset(&mh, 0, sizeof(mh));
     mh.msg_iov = iov;
 
@@ -597,7 +658,7 @@ int katzpack_sendmsg(struct katzconn *conn, struct katzpack *p, int len)
         i -= KPHSIZE;
         debug("sent %i bytes\n", i);
     } else {
-        debug("sendmsg failed\n", i);
+        debug("sendmsg failed\n");
     }
 
     return i;
@@ -618,7 +679,7 @@ int katz_process_out(struct katzconn *conn)
 
     /* send keepalive / acknowledge data OR send data */
     if (q==NULL) {
-        debug( "sending keepalive/acking data\n");
+        debug("sending keepalive/acking data\n");
         len = 0;
         p.data = NULL;
         p.seq = 0;
@@ -632,7 +693,7 @@ int katz_process_out(struct katzconn *conn)
 
     p.flag = KACK;
     p.ack = conn->ack+1; // XXX: check for overflow
-    // XXX: experimental -- only makes sense if iq can grow
+    // XXX: experimental - enabling this seems to trigger a bug atm:
     //p.ack = conn->iq_seq_ready+1;
 
     ret = katzpack_sendmsg(conn, &p, len);
@@ -703,7 +764,15 @@ int katz_process_in(struct katzconn *conn)
         debug("ignoring data, old seq\n");
     }
 
-    if ((conn->oq != NULL) && (p.ack > conn->oq->seq)) { // we delivered data, clear buffer
+    if (p.ack == conn->seq+1) {
+        /* got same ack again */
+        conn->lar_count++;
+    }
+    else {
+        conn->lar_count = 0;
+    }
+    if ((conn->oq != NULL) && (p.ack > conn->oq->seq)) {
+        /* we delivered data, clear buffer */
         debug("got new ACK, clearing oq\n");
         katzconn_process_ack(conn, p.ack);
     }
@@ -712,7 +781,7 @@ int katz_process_in(struct katzconn *conn)
          * could use a better way to decide wether SEQ was lost, maybe
          * introduce NACK
          */
-        if (conn->n_oq > 0)
+        if (conn->n_iq > 0)
             conn->outstanding_ack = 1;
         else
             conn->outstanding_ack = 0;
@@ -891,6 +960,9 @@ int katz_read(struct katzconn *conn, char *buf, int len)
         debug("next seq not in iq\n");
         return -2;
     }
+    if (q->seq != next) {
+        errx(1, "queue is broken! (internal error)\n");
+    }
 
     if (len < q->len)
         errx(1, "not handling small reads properly atm");
@@ -1048,6 +1120,7 @@ void katz_disconnect(struct katzconn *conn)
     conn->ack = 0;
     conn->seq = 0;
     conn->flag = KNIL;
+    free(conn->iq);
 }
 
 
@@ -1057,6 +1130,7 @@ void katz_init_connection(
 {
     conn->seq = 0;
     conn->ack = 0;
+    conn->lar_count = 0;
     conn->flag = KNIL;
     conn->bwlim = kp->bw;
     conn->keepalive = kp->keepalive;
@@ -1065,19 +1139,23 @@ void katz_init_connection(
     conn->last_check = time(NULL);
     conn->ipfd = ipfd;
     conn->opfd = opfd;
+    conn->dups = 0;
 
     conn->iq = NULL;
     conn->n_iq = 0;
     conn->iq_seq_ready = 0;
     conn->outstanding_ack = 0;
 
-    conn->iq = calloc(sizeof(struct katzq), MAXQLEN);
+    // TODO: add parameter
+    conn->iq = calloc(kp->oq_maxlen, sizeof(struct katzq));
     if (conn->iq == NULL)
         err(1, "calloc");
-    conn->iq_size = MAXQLEN;
+    conn->iq_size = kp->oq_maxlen;
 
     conn->oq = NULL;
     conn->oq_last = NULL;
+    conn->oq_timeout = NULL;
+    conn->oq_unsent = NULL;
     conn->n_oq = 0;
     conn->oq_maxlen = kp->oq_maxlen;
     
@@ -1138,8 +1216,9 @@ void katz_peer(struct katzparm *kp)
         print_katzconn(&conn);
 #endif 
 
-        if ( ((timeout = smallest_oq_timeout(&conn))==0)
-                || (conn.outstanding_ack)) {
+        if (
+                ((timeout = smallest_oq_timeout(&conn)) == 0)
+                || (conn.outstanding_ack != 0)) {
             pfd[KSO].events = POLLOUT;
             //fprintf(stderr, "^");
         }
@@ -1244,6 +1323,7 @@ void katz_peer(struct katzparm *kp)
     }
 
     fprintf(stderr, "disconnecting...");
+    fprintf(stderr, "\n(received %d duplicates, sent %d payloads, received %d payloads)\n", conn.dups, conn.seq, conn.ack);
     katz_disconnect(&conn);
     fprintf(stderr, "done.\n");
 
