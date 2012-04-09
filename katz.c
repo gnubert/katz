@@ -339,6 +339,9 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
         return;
     }
 
+    /* got new packet -> ack it */
+    conn->outstanding_ack = 1;
+
     debug("Queueing element:\n");
     p->data = data;
     p->len = len;
@@ -353,14 +356,25 @@ inline void katzconn_insert_iq(struct katzconn *conn, char *data, int len, int s
     conn->n_iq += 1;
 
     /* set iq_seq_ready to highest consecutive seq number */
+    int i = 0;
     while (conn->iq_seq_ready == (seq-1)) {
+        i++;
         conn->iq_seq_ready = seq;
         seq += 1;
         p = (conn->iq + (seq%conn->iq_size));
-        if (p->seq == 0)
+        if (p->seq == 0) {
+            /* hit empty iq element */
             break;
-        if (seq - conn->ack > conn->iq_size)
+        }
+        if (seq - conn->ack > conn->iq_size) {
+            /* hit non-consecutive queue element
+             * (XXX: this should not happen with a ringbuffer) */
             break;
+        }
+    }
+    if (i>1) {
+        conn->ooo++;
+        //fprintf(stderr, "%d, ", i);
     }
     
 }
@@ -594,6 +608,7 @@ int katzpack_recvmsg(int sock, struct katzpack *p)
 
     p->flag = KNIL;
     if ((nread = recvmsg(sock, &mh, 0)) == -1) {
+        //warn("recvmsg");
         debug("failed to receive packet\n");
         p->data = data;
         return -1;
@@ -727,8 +742,13 @@ int katz_process_in(struct katzconn *conn)
 
     nread = katzpack_recvmsg(conn->sock, &p);
     debug("processing packet\n");
-    if (nread == -1)
-        errx(1, "katzpack_recvmsg");
+    if (nread == -1) {
+        // XXX: fail if remote did not say goodbye properly?
+        //errx(1, "katzpack_recvmsg");
+        //conn->flag = KFIN;
+        free(p.data);
+        return -1;
+    }
 
     if(clock_gettime(CLOCK_MONOTONIC, &conn->last_event))
         err(1, "clock_gettime");
@@ -781,7 +801,7 @@ int katz_process_in(struct katzconn *conn)
          * could use a better way to decide wether SEQ was lost, maybe
          * introduce NACK
          */
-        if (conn->n_iq > 0)
+        if (conn->n_oq > 0)
             conn->outstanding_ack = 1;
         else
             conn->outstanding_ack = 0;
@@ -1140,6 +1160,7 @@ void katz_init_connection(
     conn->ipfd = ipfd;
     conn->opfd = opfd;
     conn->dups = 0;
+    conn->ooo = 0;
 
     conn->iq = NULL;
     conn->n_iq = 0;
@@ -1290,9 +1311,10 @@ void katz_peer(struct katzparm *kp)
             // fill obuf if empty
             if (obuflen == 0) {
                 nread = katz_read(&conn, obuf, sizeof(obuf));
-                if (nread == 0) /* remote EOF */
+                if (nread == 0) { /* remote EOF */
+                    fprintf(stderr, "quitting for remote EOF early\n");
                     break; // this is safe, obuf is already empty
-                else if (nread == -1)
+                } else if (nread == -1)
                     errx(1, "katz_read");
                 else if (nread == -2)
                     obuflen = 0;
@@ -1314,16 +1336,20 @@ void katz_peer(struct katzparm *kp)
         }
 
         /* local EOF - outstanding buffers have been written */
-        if (pfd[KFI].fd == -1 && ibuflen == 0 && conn.n_oq == 0)
+        if (pfd[KFI].fd == -1 && ibuflen == 0 && conn.n_oq == 0) {
+            fprintf(stderr, "quitting for local EOF\n");
             break;
+        }
         /* remote EOF - outstanding buffers have been written */
-        if (pfd[KSI].fd == -1 && obuflen == 0 && conn.n_iq == 0)
+        if (pfd[KSI].fd == -1 && obuflen == 0 && conn.n_iq == 0) {
+            fprintf(stderr, "quitting for remote EOF\n");
             break;
+        }
 
     }
 
     fprintf(stderr, "disconnecting...");
-    fprintf(stderr, "\n(received %d duplicates, sent %d payloads, received %d payloads)\n", conn.dups, conn.seq, conn.ack);
+    fprintf(stderr, "\n(received %d duplicates, sent %d payloads, received %d payloads, >%d out of order)\n", conn.dups, conn.seq, conn.ack, conn.ooo);
     katz_disconnect(&conn);
     fprintf(stderr, "done.\n");
 

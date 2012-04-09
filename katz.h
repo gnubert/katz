@@ -90,6 +90,7 @@ struct katzconn {
     struct timespec
                 last_event; // time of last recv/send for use with keepalive
     uint32_t    dups;       // duplicate counter
+    uint32_t    ooo;       // counts >1 completing deliveries
     
     // bandwidth state
     int         bwlim;
