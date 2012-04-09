@@ -1312,7 +1312,7 @@ void katz_peer(struct katzparm *kp)
             if (obuflen == 0) {
                 nread = katz_read(&conn, obuf, sizeof(obuf));
                 if (nread == 0) { /* remote EOF */
-                    fprintf(stderr, "quitting for remote EOF early\n");
+                    debug("quitting for remote EOF\n");
                     break; // this is safe, obuf is already empty
                 } else if (nread == -1)
                     errx(1, "katz_read");
@@ -1337,12 +1337,12 @@ void katz_peer(struct katzparm *kp)
 
         /* local EOF - outstanding buffers have been written */
         if (pfd[KFI].fd == -1 && ibuflen == 0 && conn.n_oq == 0) {
-            fprintf(stderr, "quitting for local EOF\n");
+            debug("quitting for local EOF\n");
             break;
         }
         /* remote EOF - outstanding buffers have been written */
         if (pfd[KSI].fd == -1 && obuflen == 0 && conn.n_iq == 0) {
-            fprintf(stderr, "quitting for remote EOF\n");
+            debug("quitting for remote EOF\n");
             break;
         }
 
