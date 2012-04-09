@@ -41,9 +41,6 @@ USAGE:
   that are in transit (in the outgoing queue). Therefore, if you have
   a high RTT between peers and want to transmit at high rates, you
   will need to increase the queue length.
-  Due to poor handling of incoming packets, the number of packets in
-  transit also leads to higher load for the receiving peer at the
-  moment. So, just increasing this won't do.
   As with the timeout option, this option will vanish at some point.
 
 Here is a list of fun things to do with katz:

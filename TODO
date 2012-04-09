@@ -3,7 +3,6 @@ be done.
 
 TODO/BUGS:
 - write tests
-- improve packet buffer handling (recvmsg/sendmsg)
 - refactor - some of the code is a bit messy...
 - document - some of the code misses documentation...
 - improve timer handling (see comments in code)
