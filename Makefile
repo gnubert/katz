@@ -8,7 +8,7 @@ CFLAGS=-Wall
 CFLAGS+=$(DEBUG) ${PROFILE} $(DEFINES) $(LIBS) 
 
 katz: katz.c katz.h
-	$(CC) $(CFLAGS) -o katz katz.c
+	$(CC) -o katz katz.c $(CFLAGS)
 
 debug: katz
 
